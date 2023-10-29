@@ -17,11 +17,12 @@ basicConfig(
 )
 
 
-def extract_audio(input_file: str) -> list[str]:
+def extract_audio(input_file: str, ignore_tracks: [list[int]]) -> list[str]:
     """Given an imput file, extracts all audio tracks if they aren't already been extracted
 
     Args:
         input_file (str): a video file path
+        ignore_tracks ([list[int]]): a list of audio ID tracks to skip
 
     Returns:
         list[str]: list of paths to audio tracks
@@ -30,24 +31,25 @@ def extract_audio(input_file: str) -> list[str]:
     fluxes: list[str] = list()
     if metadata.audio:
         for i in range(0, len(metadata.audio)):
-            if not exists(target_audio_file := f"audio{i:02}.wav"):
-                cmd = (
-                    f'ffmpeg -i "{input_file}" '
-                    f"-map 0:a:{i} -acodec pcm_s16le "
-                    f'-ar 16000 "{target_audio_file}" -y'
-                )
-                p = Popen(
-                    cmd,
-                    shell=True,
-                    stdout=PIPE,
-                    stderr=STDOUT,
-                    bufsize=1,
-                    universal_newlines=True,
-                )
-                with p:
-                    for out_line in p.stdout:
-                        info(out_line)
-            fluxes.append(target_audio_file)
+            if i not in ignore_tracks:
+                if not exists(target_audio_file := f"audio{i:02}.wav"):
+                    cmd = (
+                        f'ffmpeg -i "{input_file}" '
+                        f"-map 0:a:{i} -acodec pcm_s16le "
+                        f'-ar 16000 "{target_audio_file}" -y'
+                    )
+                    p = Popen(
+                        cmd,
+                        shell=True,
+                        stdout=PIPE,
+                        stderr=STDOUT,
+                        bufsize=1,
+                        universal_newlines=True,
+                    )
+                    with p:
+                        for out_line in p.stdout:
+                            info(out_line)
+                fluxes.append(target_audio_file)
     return fluxes
 
 
@@ -66,7 +68,7 @@ def concat(list_to_merge: list[str], output: str = 'output.mp4') -> None:
         '-i', pipeline_file, "-map", "0", "-c:a", "copy", output])
 
 
-def cut_video_file(input_file: str, output_file: str, start_timecode: float, end_timecode: float, avoid_freezes: bool = True, delta: float = 5.0, margins: float = 0.25) -> str:
+def cut_video_file(input_file: str, output_file: str, start_timecode: float, end_timecode: float, avoid_freezes: bool = True, delta: float = 2.0, margins: float = 0) -> str:
     """Extracts section from video, based on timecodes, in seconds.
 
     Args:
@@ -88,10 +90,10 @@ def cut_video_file(input_file: str, output_file: str, start_timecode: float, end
     if end_timecode > start_timecode:
         if avoid_freezes:
             run(["ffmpeg", '-y', "-ss", str(start_timecode-delta-margins), "-i", input_file, "-ss",
-                str(delta-margins), "-t", str((end_timecode-start_timecode)+2*margins), "-map", "0", "-c:a", "copy", output_file])
+                str(delta-margins), "-t", str((end_timecode-start_timecode)+margins+delta), "-map", "0", "-c:a", "copy", output_file])
         else:
             run(["ffmpeg", '-y', "-ss", str(start_timecode-delta-margins), "-i", input_file, "-ss",
-                str(delta-margins), "-t", str((end_timecode-start_timecode)+2*margins), "-map", "0", "-c:a", "copy", output_file])
+                str(delta-margins), "-t", str((end_timecode-start_timecode)+margins+delta), "-map", "0", "-c:a", "copy", output_file])
         return output_file
     raise ValueError("Specified timestamps are not valid.")
 
@@ -118,7 +120,7 @@ def filter_silences(list_of_silences: list[set]) -> list[tuple]:
     return blanks
 
 
-def detect_silences(input_file: str) -> list:
+def detect_silences(input_file: str, audio_to_skip: list[int]) -> list:
     """Extracts the silences in miliseconds from a audio file
 
     Args:
@@ -127,7 +129,7 @@ def detect_silences(input_file: str) -> list:
     Returns:
         list: list of tuples of silences positions
     """
-    audio_tracks: list[str] = extract_audio(input_file)
+    audio_tracks: list[str] = extract_audio(input_file, audio_to_skip)
     silences: list[set] = list()
     # Extracting audio chans to perform silence analysis
     for audio in audio_tracks:
@@ -204,19 +206,20 @@ def extract_parts(input_file: str, endpoints: list[list[float, float]]) -> list[
     base_name, extension = Path(input_file).stem, Path(input_file).suffix
     outputs: list[str] = list()
     for i, (start, end) in enumerate(endpoints):
-        cut_video_file(
-            input_file=input_file,
-            output_file=(output := f"{base_name}_{i}{extension}"),
-            start_timecode=start,
-            end_timecode=end,
-            avoid_freezes=True,
-            delta=1.0
-        )
+        if not exists(output := f"{base_name}_{i}{extension}"):
+            cut_video_file(
+                input_file=input_file,
+                output_file=output,
+                start_timecode=start,
+                end_timecode=end,
+                avoid_freezes=True,
+                delta=1.0
+            )
         outputs.append(output)
     return outputs
 
 
-def extract(input_file: str, recombine: bool = False) -> None:
+def extract(input_file: str, audio_to_skip: list[int], recombine: bool = False) -> None:
     """Main function, calls the pipeline
 
     Args:
@@ -225,11 +228,12 @@ def extract(input_file: str, recombine: bool = False) -> None:
     """
 
     # We detect the silences and we dump those in a json file
-    dump(detect_silences(input_file), open(
-        "silences_detected.json", 'w', encoding='utf-8'), indent=3)
+    if not exists("silences_detected.json"):
+        dump(detect_silences(input_file, audio_to_skip), open(
+            "silences_detected.json", 'w', encoding='utf-8'), indent=3)
     # We use the json file to do the actual extraction
     cut_files: list = extract_parts(input_file, parts_to_keep(0.0, get_duration(
-        input_file), load(open("temp.json", "r", encoding='utf-8'))))
+        input_file), load(open("silences_detected.json", "r", encoding='utf-8'))))
     # If we ask for, we merge the files in a single one
     if recombine:
         concat(cut_files, f"output{Path(input_file).suffix}")
@@ -238,6 +242,8 @@ def extract(input_file: str, recombine: bool = False) -> None:
 if __name__ == "__main__":
     parser = ArgumentParser(add_help=False)
     parser.add_argument("input", type=str, help="Path to input video file.")
+    parser.add_argument("-s", "--skipaudiotracks", type=int, nargs='*',
+                        help="Intcodes of audio tracks to skip during analysis", default=[])
     args = parser.parse_args()
 
-    extract(args.input)
+    extract(args.input, [int(track) for track in args.skipaudiotracks])
