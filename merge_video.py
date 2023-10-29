@@ -6,6 +6,7 @@ from pydub import AudioSegment, silence
 from ffprobe import FFProbe
 from logging import basicConfig, info, INFO
 from tharospytools.list_tools import grouper
+from tharospytools.console_utilities import progress_bar
 from os.path import exists
 from json import dump, load
 ERROR_FORMAT = (
@@ -29,14 +30,17 @@ def extract_audio(input_file: str, ignore_tracks: [list[int]]) -> list[str]:
     """
     metadata = FFProbe(input_file)
     fluxes: list[str] = list()
+    print("Extracting audio from container")
     if metadata.audio:
         for i in range(0, len(metadata.audio)):
             if i not in ignore_tracks:
+                progress_bar(i, len(metadata.audio), bar_length=50)
                 if not exists(target_audio_file := f"audio{i:02}.wav"):
                     cmd = (
                         f'ffmpeg -i "{input_file}" '
                         f"-map 0:a:{i} -acodec pcm_s16le "
                         f'-ar 16000 "{target_audio_file}" -y'
+                        '-loglevel quiet'
                     )
                     p = Popen(
                         cmd,
@@ -90,10 +94,10 @@ def cut_video_file(input_file: str, output_file: str, start_timecode: float, end
     if end_timecode > start_timecode:
         if avoid_freezes:
             run(["ffmpeg", '-y', "-ss", str(start_timecode-delta-margins), "-i", input_file, "-ss",
-                str(delta-margins), "-t", str((end_timecode-start_timecode)+margins+delta), "-map", "0", "-c:a", "copy", output_file])
+                str(delta-margins), "-t", str((end_timecode-start_timecode)+margins+delta), "-map", "0", "-c:a", "copy", output_file, '-loglevel', 'quiet'])
         else:
             run(["ffmpeg", '-y', "-ss", str(start_timecode-delta-margins), "-i", input_file, "-ss",
-                str(delta-margins), "-t", str((end_timecode-start_timecode)+margins+delta), "-map", "0", "-c:a", "copy", output_file])
+                str(delta-margins), "-t", str((end_timecode-start_timecode)+margins+delta), "-map", "0", "-c:a", "copy", output_file, '-loglevel', 'quiet'])
         return output_file
     raise ValueError("Specified timestamps are not valid.")
 
@@ -132,14 +136,15 @@ def detect_silences(input_file: str, audio_to_skip: list[int]) -> list:
     audio_tracks: list[str] = extract_audio(input_file, audio_to_skip)
     silences: list[set] = list()
     # Extracting audio chans to perform silence analysis
-    for audio in audio_tracks:
+    print("Processing audio tracks analysis")
+    for i, audio in enumerate(audio_tracks):
+        progress_bar(i, len(audio_tracks), bar_length=50)
         myaudio = AudioSegment.from_wav(audio)
         blanks = silence.detect_silence(
             myaudio,
             min_silence_len=1000,
             silence_thresh=myaudio.dBFS-16
         )
-        # Process and exclude multiple audios (for now only returns the analysis of the first)
         silences.append(
             {i for start, stop in blanks for i in range(start, stop)}
         )
@@ -205,7 +210,9 @@ def extract_parts(input_file: str, endpoints: list[list[float, float]]) -> list[
     """
     base_name, extension = Path(input_file).stem, Path(input_file).suffix
     outputs: list[str] = list()
+    print(f"Extracting {len(endpoints)} video sequences")
     for i, (start, end) in enumerate(endpoints):
+        progress_bar(i, len(endpoints), bar_length=50)
         if not exists(output := f"{base_name}_{i}{extension}"):
             cut_video_file(
                 input_file=input_file,
