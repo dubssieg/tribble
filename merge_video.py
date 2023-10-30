@@ -7,7 +7,7 @@ from ffprobe import FFProbe
 from logging import basicConfig, info, INFO
 from tharospytools.list_tools import grouper
 from tharospytools.console_utilities import progress_bar
-from os.path import exists
+from os import path
 from json import dump, load
 ERROR_FORMAT = (
     "%(asctime)s | %(levelname)s in %(funcName)s in %(filename)s "
@@ -35,7 +35,7 @@ def extract_audio(input_file: str, ignore_tracks: [list[int]]) -> list[str]:
         for i in range(0, len(metadata.audio)):
             if i not in ignore_tracks:
                 progress_bar(i, len(metadata.audio), bar_length=50)
-                if not exists(target_audio_file := f"audio{i:02}.wav"):
+                if not path.exists(target_audio_file := path.join(Path(input_file).parent, f"audio{i:02}.wav")):
                     cmd = (
                         f'ffmpeg -i "{input_file}" '
                         f"-map 0:a:{i} -acodec pcm_s16le "
@@ -213,7 +213,7 @@ def extract_parts(input_file: str, endpoints: list[list[float, float]]) -> list[
     print(f"Extracting {len(endpoints)} video sequences")
     for i, (start, end) in enumerate(endpoints):
         progress_bar(i, len(endpoints), bar_length=50)
-        if not exists(output := f"{base_name}_{i}{extension}"):
+        if not path.exists(output := path.join(Path(input_file).parent, f"{Path(input_file).stem}_CUT", f"{base_name}_{i}{extension}")):
             cut_video_file(
                 input_file=input_file,
                 output_file=output,
@@ -235,12 +235,12 @@ def extract(input_file: str, audio_to_skip: list[int], recombine: bool = False) 
     """
 
     # We detect the silences and we dump those in a json file
-    if not exists("silences_detected.json"):
+    if not path.exists(json_file := path.join(Path(input_file).parent, f"silences_detected_{Path(input_file).stem}.json")):
         dump(detect_silences(input_file, audio_to_skip), open(
-            "silences_detected.json", 'w', encoding='utf-8'), indent=3)
+            json_file, 'w', encoding='utf-8'), indent=3)
     # We use the json file to do the actual extraction
     cut_files: list = extract_parts(input_file, parts_to_keep(0.0, get_duration(
-        input_file), load(open("silences_detected.json", "r", encoding='utf-8'))))
+        input_file), load(open(json_file, "r", encoding='utf-8'))))
     # If we ask for, we merge the files in a single one
     if recombine:
         concat(cut_files, f"output{Path(input_file).suffix}")
@@ -254,3 +254,4 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     extract(args.input, [int(track) for track in args.skipaudiotracks])
+    print("Job ended sucessfully!")
