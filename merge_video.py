@@ -34,7 +34,7 @@ def extract_audio(input_file: str, ignore_tracks: [list[int]]) -> list[str]:
     if metadata.audio:
         for i in range(0, len(metadata.audio)):
             if i not in ignore_tracks:
-                progress_bar(i, len(metadata.audio), bar_length=50)
+                progress_bar(i+1, len(metadata.audio), bar_length=50)
                 if not path.exists(target_audio_file := path.join(Path(input_file).parent, f"audio{i:02}.wav")):
                     cmd = (
                         f'ffmpeg -i "{input_file}" '
@@ -138,7 +138,7 @@ def detect_silences(input_file: str, audio_to_skip: list[int]) -> list:
     # Extracting audio chans to perform silence analysis
     print("Processing audio tracks analysis")
     for i, audio in enumerate(audio_tracks):
-        progress_bar(i, len(audio_tracks), bar_length=50)
+        progress_bar(i+1, len(audio_tracks), bar_length=50)
         myaudio = AudioSegment.from_wav(audio)
         blanks = silence.detect_silence(
             myaudio,
@@ -212,7 +212,7 @@ def extract_parts(input_file: str, endpoints: list[list[float, float]]) -> list[
     outputs: list[str] = list()
     print(f"Extracting {len(endpoints)} video sequences")
     for i, (start, end) in enumerate(endpoints):
-        progress_bar(i, len(endpoints), bar_length=50)
+        progress_bar(i+1, len(endpoints), bar_length=50)
         if not path.exists(output := path.join(Path(input_file).parent, f"{Path(input_file).stem}_CUT", f"{base_name}_{i}{extension}")):
             cut_video_file(
                 input_file=input_file,
