@@ -40,7 +40,6 @@ def extract_audio(input_file: str, ignore_tracks: [list[int]]) -> list[str]:
                         f'ffmpeg -i "{input_file}" '
                         f"-map 0:a:{i} -acodec pcm_s16le "
                         f'-ar 16000 "{target_audio_file}" -y'
-                        '-loglevel quiet'
                     )
                     p = Popen(
                         cmd,
@@ -72,7 +71,7 @@ def concat(list_to_merge: list[str], output: str = 'output.mp4') -> None:
         '-i', pipeline_file, "-map", "0", "-c:a", "copy", output])
 
 
-def cut_video_file(input_file: str, output_file: str, start_timecode: float, end_timecode: float, avoid_freezes: bool = True, delta: float = 2.0, margins: float = 0) -> str:
+def cut_video_file(input_file: str, output_file: str, start_timecode: float, end_timecode: float, avoid_freezes: bool = True, delta: float = 2.0, margins: float = 0.3) -> str:
     """Extracts section from video, based on timecodes, in seconds.
 
     Args:
