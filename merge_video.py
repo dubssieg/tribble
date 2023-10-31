@@ -7,7 +7,7 @@ from ffprobe import FFProbe
 from logging import basicConfig, info, INFO
 from tharospytools.list_tools import grouper
 from tharospytools.console_utilities import progress_bar
-from os import path
+from os import path, remove
 from json import dump, load
 ERROR_FORMAT = (
     "%(asctime)s | %(levelname)s in %(funcName)s in %(filename)s "
@@ -123,8 +123,8 @@ def filter_silences(list_of_silences: list[set]) -> list[tuple]:
     return blanks
 
 
-def detect_silences(input_file: str, audio_to_skip: list[int]) -> list:
-    """Extracts the silences in miliseconds from a audio file
+def detect_silences(audio_tracks: list[str]) -> list:
+    """Extracts the silences in miliseconds from a series of audio files
 
     Args:
         input_file (str): the audio file
@@ -132,7 +132,6 @@ def detect_silences(input_file: str, audio_to_skip: list[int]) -> list:
     Returns:
         list: list of tuples of silences positions
     """
-    audio_tracks: list[str] = extract_audio(input_file, audio_to_skip)
     silences: list[set] = list()
     # Extracting audio chans to perform silence analysis
     print("Processing audio tracks analysis")
@@ -225,17 +224,18 @@ def extract_parts(input_file: str, endpoints: list[list[float, float]]) -> list[
     return outputs
 
 
-def extract(input_file: str, audio_to_skip: list[int], recombine: bool = False) -> None:
+def extract(input_file: str, audio_to_skip: list[int], recombine: bool = False, keep_json: bool = False) -> None:
     """Main function, calls the pipeline
 
     Args:
         input_file (str): video input file
         recombine (bool, optional): if output should be merged or not. Defaults to False.
     """
-
+    # We extract audios
+    audio_tracks: list[str] = extract_audio(input_file, audio_to_skip)
     # We detect the silences and we dump those in a json file
     if not path.exists(json_file := path.join(Path(input_file).parent, f"silences_detected_{Path(input_file).stem}.json")):
-        dump(detect_silences(input_file, audio_to_skip), open(
+        dump(detect_silences(audio_tracks), open(
             json_file, 'w', encoding='utf-8'), indent=3)
     # We use the json file to do the actual extraction
     cut_files: list = extract_parts(input_file, parts_to_keep(0.0, get_duration(
@@ -243,6 +243,11 @@ def extract(input_file: str, audio_to_skip: list[int], recombine: bool = False) 
     # If we ask for, we merge the files in a single one
     if recombine:
         concat(cut_files, f"output{Path(input_file).suffix}")
+    # Cleaning the temporary files
+    for track in audio_tracks:
+        remove(track)
+    if not keep_json:
+        remove(json_file)
 
 
 if __name__ == "__main__":
@@ -250,7 +255,18 @@ if __name__ == "__main__":
     parser.add_argument("input", type=str, help="Path to input video file.")
     parser.add_argument("-s", "--skipaudiotracks", type=int, nargs='*',
                         help="Intcodes of audio tracks to skip during analysis", default=[])
+    parser.add_argument("-k", "--keepjson", type=bool,
+                        help="The file containing the silence timecodes should be keep", action='store_true')
+    parser.add_argument("-r", "--recombine", type=bool,
+                        help="All the files should be merged in a single one at the end", action='store_true')
     args = parser.parse_args()
 
-    extract(args.input, [int(track) for track in args.skipaudiotracks])
+    extract(
+        args.input,
+        [
+            int(track) for track in args.skipaudiotracks
+        ],
+        recombine=args.recombine,
+        keep_json=args.keepjson,
+    )
     print("Job ended sucessfully!")
